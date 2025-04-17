@@ -8,6 +8,7 @@ from lightning.pytorch.loggers import WandbLogger   # 用来实例化 wandb_logg
 from lightning.pytorch.callbacks import ModelCheckpoint # 用来实例化 checkpoint_callback 的
 from UNet import UNet
 from utils import get_latest_checkpoint, CheckpointCleanupCallback
+from metric import CustomMetricCallback
 
 if __name__ == '__main__':
     config = OmegaConf.load('config.yaml')
@@ -53,7 +54,11 @@ if __name__ == '__main__':
         logger=wandb_logger,
         max_epochs=config.Other.max_epochs,
         log_every_n_steps=config.Other.log_every_n_steps,    # 每 1 个 step 打一次 log
-        callbacks=[checkpoint_callback, CheckpointCleanupCallback(ckpt_dir, config.Other.ckpt_save_num)],
+        callbacks=[
+            checkpoint_callback,
+            CheckpointCleanupCallback(ckpt_dir, config.Other.ckpt_save_num),
+            CustomMetricCallback(),
+        ],
     )
 
     trainer.fit(
