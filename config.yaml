@@ -1,0 +1,31 @@
+Dataset:
+  target: dataloader.DataModuleFromConfig
+  batch_size: 2
+  num_workers: 12
+  train:
+    _target_: dataset.MyDataset
+    data_dir: 'D:\Downloads\medical'
+    mode: train
+    length: 16
+    augment: false
+  val:
+    _target_: dataset.MyDataset
+    data_dir: 'D:\Downloads\medical'
+    mode: val
+    length: 16
+    augment: false
+  test:
+    _target_: dataset.MyDataset
+    data_dir: 'D:\Downloads\medical'
+    mode: test
+    length: 16
+    augment: false
+
+Other:
+  seed: 123
+  ckpt_dir: 'checkpoints'
+  ckpt_save_num: 2 # 保留最新的 2 个 ckpt
+  ckpt_save_interval: 5 # 5 个 epoch 保存一次 ckpt
+
+  max_epochs: 10
+  log_every_n_steps: 1 # 每 1 步 step 向 wandb 打印一次指标
