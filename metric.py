@@ -5,9 +5,14 @@ class CustomMetricCallback(Callback):
     def __init__(self):
         super().__init__()
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None):
         pass
-        # 这里把计算逻辑写了
 
     def on_validation_epoch_end(self, trainer, pl_module):
+        pass
+
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None):
+        pass
+
+    def on_test_epoch_end(self, trainer, pl_module):
         pass

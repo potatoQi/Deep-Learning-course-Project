@@ -1,10 +1,11 @@
-import cv2
+import torch
 import numpy as np
 import SimpleITK as sitk
 import nibabel as nib
 import os
 from matplotlib import pyplot as plt
 from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms as T
 
 # 读取 NIfTI 文件 (.nii.gz) 使用 SimpleITK
 def read_nifti_with_simpleitk(file_path):
@@ -28,6 +29,7 @@ def display_slice(image_data, slice_index):
 
 def display_image(image_data, slice_index):
     assert 0 <= slice_index < image_data.shape[0], "Slice index out of range"
+    slice_index = len(image_data) - 2
     display_slice(image_data, slice_index)
 
     slice_image = image_data[slice_index, :, :]
@@ -48,14 +50,16 @@ class MyDataset(Dataset):
     def __init__(
         self,
         data_dir='D:\Downloads\medical',
-        mode='trian',
+        mode='train',
         length=16,
         augment=False,
+        size=[32,32],
     ):
         self.data_dir = data_dir
         self.mode = mode
         self.length = length
         self.augment = augment
+        self.size = size
         self._load_metadata()
 
     def _load_metadata(self):
@@ -119,17 +123,22 @@ class MyDataset(Dataset):
             x_data = x_data[:self.length, :, :]
             y_data = y_data[:self.length, :, :]
 
+        # 尺寸裁剪到 xxx
+        x_data, y_data = self.resize(x_data, y_data, self.size)
+
         # 对 features 进行归一化
-        '''
-        TODO: 目前这里只是实现了一个简单的 [0, 1] 归一化
-        是否要进行固定值截断, 还是根据分布进行截断, 去调研清楚
-        '''
-        x_data = x_data / np.max(x_data)  # 归一化到 [0, 1]
+        # TODO: 目前这里只是实现了一个简单的 [-1, 1] 归一化配合固定值截断, 是否还有更好的方式
+        x_data = np.clip(x_data, -300, 300)
+        x_data = (x_data + 300) / 600.0
+        x_data = x_data * 2 - 1
 
         # 对 x_data 进行数据增强
-        # TODO: 这里暂未实现, 请参考: https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py 的 643 ~ 673 行的实现方式
+        # TODO: 这里目前简单实现了一下, 但是我们需要参考: https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py 的 643 ~ 673 行的实现方式
         if self.augment:
-            pass
+            x_data = self.augment_data(x_data)
+
+        x_data = torch.tensor(x_data).float()
+        y_data = torch.tensor(y_data).float()
 
         res = {
             'feature': x_data,
@@ -137,6 +146,39 @@ class MyDataset(Dataset):
         }
 
         return res
+    
+    def resize(self, x_data, y_data, target_size):
+        # 使用简单的裁剪或缩放（如果数据尺寸大于目标尺寸）
+        t, h, w = x_data.shape
+        target_h, target_w = target_size[0], target_size[1]
+
+        if h > target_h or w > target_w:
+            # 随机裁剪
+            top = np.random.randint(0, h - target_h + 1)
+            left = np.random.randint(0, w - target_w + 1)
+            x_data = x_data[:, top:top + target_h, left:left + target_w]
+            y_data = y_data[:, top:top + target_h, left:left + target_w]
+        elif h < target_h or w < target_w:
+            # 填充到目标尺寸
+            pad_h = target_h - h
+            pad_w = target_w - w
+            x_data = np.pad(x_data, ((0, 0), (0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
+            y_data = np.pad(y_data, ((0, 0), (0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
+        
+        return x_data, y_data
+    
+    def augment_data(self, x_data):
+        # 定义数据增强的变换
+        transform = T.Compose([
+            T.RandomHorizontalFlip(p=0.5),  # 50% 概率进行水平翻转
+            T.RandomVerticalFlip(p=0.5),    # 50% 概率进行垂直翻转
+            T.RandomRotation(30),           # 随机旋转，最大旋转角度为 30°
+            T.RandomAffine(degrees=0, translate=(0.1, 0.1)),  # 随机平移
+        ])
+
+        x_data = torch.tensor(x_data).float()
+        x_data = transform(x_data)
+        return x_data
 
 if __name__ == '__main__':
     dataset = MyDataset(
@@ -144,10 +186,10 @@ if __name__ == '__main__':
         mode='train',
     )
 
-    # base_features_path = 'D:\Downloads\medical\imagesTr'
-    # base_labels_path = 'D:\Downloads\medical\labelsTr'
+    base_features_path = 'D:\Downloads\medical\imagesTr'
+    base_labels_path = 'D:\Downloads\medical\labelsTr'
 
-    # t1 = get_data(os.path.join(base_features_path, 'liver_0.nii.gz'), use_simpleitk=True)   # [75 512 512]
-    # display_image(t1, 0)
-    # t2 = get_data(os.path.join(base_labels_path, 'liver_0.nii.gz'), use_simpleitk=True)     # [75 512 512]
-    # display_image(t2, 0)
+    t1 = get_data(os.path.join(base_features_path, 'liver_0.nii.gz'), use_simpleitk=True)   # [75 512 512]
+    display_image(t1, 0)
+    t2 = get_data(os.path.join(base_labels_path, 'liver_0.nii.gz'), use_simpleitk=True)     # [75 512 512]
+    display_image(t2, 0)
