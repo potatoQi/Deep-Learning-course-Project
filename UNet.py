@@ -223,7 +223,12 @@ class UNet(L.LightningModule):
     def training_step(self, batch, batch_idx):
         x = batch['feature']    # [b c h w]
         y = batch['label']      # [b c h w]
-        
+        x = self(x)
+        loss = self.loss_fn(x, y)
+        self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=False)
+        return loss
+    
+    def forward(self, x):
         x = self.conv_in(x)
         down_outs = []
         for block in self.downs:
@@ -236,11 +241,8 @@ class UNet(L.LightningModule):
         x = self.norm(x)
         x = self.silu(x)
         x = self.conv_out(x)    # [b c h w], logits
+        return x
 
-        loss = self.loss_fn(x, y)
-        self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=False)
-        return loss
-    
     # configure_optimizers 是 lightning model 必写的一个函数
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.lr)

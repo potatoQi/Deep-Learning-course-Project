@@ -58,12 +58,17 @@ if __name__ == '__main__':
         with open('last_config.yaml', 'r') as f:
             last_config = OmegaConf.load(f)
     latest_checkpoint = None
-    if last_config is not None and OmegaConf.to_container(last_config) == OmegaConf.to_container(config):
-        latest_checkpoint = get_latest_checkpoint(checkpoint_dir=ckpt_dir)
-        print('配置与上次一样, 加载的检查点:', latest_checkpoint)
+    if config.Trainer.use_ckpt:
+        if last_config is not None and OmegaConf.to_container(last_config) == OmegaConf.to_container(config):
+            latest_checkpoint = get_latest_checkpoint(checkpoint_dir=ckpt_dir)
+            print('配置与上次一样, 加载的检查点:', latest_checkpoint)
+        else:
+            print('配置与上次不同, 正在重新训练...')
+            OmegaConf.save(config, 'last_config.yaml')
+            ckpt_files = glob.glob(os.path.join(ckpt_dir, '*.ckpt'))
+            for ckpt_file in ckpt_files:
+                os.remove(ckpt_file)
     else:
-        print('配置与上次不同, 正在重新训练...')
-        OmegaConf.save(config, 'last_config.yaml')
         ckpt_files = glob.glob(os.path.join(ckpt_dir, '*.ckpt'))
         for ckpt_file in ckpt_files:
             os.remove(ckpt_file)

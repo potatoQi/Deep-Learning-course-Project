@@ -4,7 +4,7 @@ import SimpleITK as sitk
 import nibabel as nib
 import os
 from matplotlib import pyplot as plt
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import torchvision.transforms as T
 
 # 读取 NIfTI 文件 (.nii.gz) 使用 SimpleITK
@@ -120,10 +120,11 @@ class MyDataset(Dataset):
             x_data = x_data[start_idx:end_idx, :, :]
             y_data = y_data[start_idx:end_idx, :, :]
         else:
+            # 验证集和测试集其实不会用到 __getitem__ 的逻辑
             x_data = x_data[:self.length, :, :]
             y_data = y_data[:self.length, :, :]
 
-        # 尺寸裁剪到 xxx
+        # 尺寸裁剪到 self.size
         x_data, y_data = self.resize(x_data, y_data, self.size)
 
         # 对 features 进行归一化
@@ -143,6 +144,10 @@ class MyDataset(Dataset):
         res = {
             'feature': x_data,
             'label': y_data,
+            'feature_path': x_path,
+            'label_path': y_path,
+            'length': self.length,
+            'size': self.size,
         }
 
         return res

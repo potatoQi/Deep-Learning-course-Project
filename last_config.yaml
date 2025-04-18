@@ -1,3 +1,10 @@
+Trainer:
+  seed: 123
+  exp_dir: results/1
+  ckpt_save_num: 2
+  ckpt_save_interval: 1
+  max_epochs: 10
+  log_every_n_steps: 1
 Dataset:
   target: dataloader.DataModuleFromConfig
   batch_size: 8
@@ -25,13 +32,6 @@ Dataset:
     length: ${Dataset.train.length}
     augment: false
     size: ${Dataset.train.size}
-Trainer:
-  seed: 123
-  exp_dir: results/1
-  ckpt_save_num: 2
-  ckpt_save_interval: 1
-  max_epochs: 10
-  log_every_n_steps: 1
 UNet:
   _target_: UNet.UNet
   im_channels: ${Dataset.train.length}
