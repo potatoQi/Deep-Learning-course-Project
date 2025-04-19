@@ -76,7 +76,8 @@ if __name__ == '__main__':
     trainer = L.Trainer(
         logger=wandb_logger,
         max_epochs=config.Trainer.max_epochs,
-        log_every_n_steps=config.Trainer.log_every_n_steps,    # 每 1 个 step 打一次 log
+        log_every_n_steps=config.Trainer.log_every_n_steps,    # 每 x 个 step 打一次 训练log
+        check_val_every_n_epoch=config.Trainer.check_val_every_n_epoch,  # 每 x 个 epoch 验证一次
         callbacks=[
             checkpoint_callback,
             CheckpointCleanupCallback(ckpt_dir, config.Trainer.ckpt_save_num),

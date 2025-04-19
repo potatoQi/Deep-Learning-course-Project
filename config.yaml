@@ -2,11 +2,12 @@ Trainer:
   seed: 123
   exp_dir: 'results/1'
   use_ckpt: false
-  ckpt_save_num: 2 # 保留最新的 2 个 ckpt
-  ckpt_save_interval: 1 # 5 个 epoch 保存一次 ckpt
+  ckpt_save_num: 1 # 保留最新的 2 个 ckpt
+  ckpt_save_interval: 5 # 5 个 epoch 保存一次 ckpt
 
-  max_epochs: 10
-  log_every_n_steps: 1 # 每 1 步 step 打印一次指标
+  max_epochs: 50
+  log_every_n_steps: 1 # 每 1 步 step 打印一次训练指标
+  check_val_every_n_epoch: 5 # 每 5 个 epoch 验证一次
 
 Dataset:
   target: dataloader.DataModuleFromConfig
@@ -21,14 +22,14 @@ Dataset:
     size: [32, 32]
   val:
     _target_: dataset.MyDataset
-    data_dir: 'D:\Downloads\medical'
+    data_dir: ${Dataset.train.data_dir}
     mode: val
     length: ${Dataset.train.length}
     augment: false
     size: ${Dataset.train.size}
   test:
     _target_: dataset.MyDataset
-    data_dir: 'D:\Downloads\medical'
+    data_dir: ${Dataset.train.data_dir}
     mode: test
     length: ${Dataset.train.length}
     augment: false

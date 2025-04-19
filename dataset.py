@@ -147,7 +147,7 @@ class MyDataset(Dataset):
             'feature_path': x_path,
             'label_path': y_path,
             'length': self.length,
-            'size': self.size,
+            'size': list(self.size),
         }
 
         return res
