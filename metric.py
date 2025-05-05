@@ -169,5 +169,23 @@ class CustomMetricCallback(Callback):
     @torch.no_grad()
     def on_test_epoch_end(self, trainer, pl_module):
         mean_dice = sum(self.dice_list) / len(self.dice_list)
+        self.log('val_dice', mean_dice, prog_bar=True, on_step=False, on_epoch=True)
+
+        fake_np = np.stack(self.fake_label_list, axis=0)  # [N, C, H, W]
+        real_np = np.stack(self.real_label_list, axis=0)
+        logger = trainer.logger
+        if isinstance(logger, WandbLogger):
+            wb = logger.experiment
+            wb.log({
+                "test_fake_images": [wandb.Image(img) for img in fake_np],
+                "test_real_images": [wandb.Image(img) for img in real_np],
+            }, step=trainer.current_epoch)
+        elif isinstance(logger, TensorBoardLogger):
+            tb = logger.experiment
+            tb.add_images("test/fake", fake_np, trainer.current_epoch, dataformats="NCHW")
+            tb.add_images("test/real", real_np, trainer.current_epoch, dataformats="NCHW")
+
         self.dice_list = []
-        self.log('test_dice', mean_dice, prog_bar=True, on_step=False, on_epoch=True)
+        self.fake_label_list = []
+        self.real_label_list = []
+        self.img_tim = 0
