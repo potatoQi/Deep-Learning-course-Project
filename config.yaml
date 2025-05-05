@@ -1,45 +1,51 @@
 Trainer:
   seed: 123
-  exp_dir: 'results/1'
+  exp_dir: './results/1'            # 训练结果保存路径 (ckpt, log (wandb 会保存在根目录), etc.)
+  logger: tensorboard                     # wandb / tensorboard / null
   use_ckpt: false
-  ckpt_save_num: 1 # 保留最新的 2 个 ckpt
-  ckpt_save_interval: 5 # 5 个 epoch 保存一次 ckpt
-
-  max_epochs: 50
-  log_every_n_steps: 1 # 每 1 步 step 打印一次训练指标
-  check_val_every_n_epoch: 5 # 每 5 个 epoch 验证一次
+  ckpt_save_num: 1                  # 保留最新的 x 个 ckpt
+  ckpt_save_interval: 5             # x 个 epoch 保存一次 ckpt
+  max_epochs: 10
+  log_every_n_steps: 1              # 每 1 步 step 打印一次训练指标
+  check_val_every_n_epoch: 1        # 每 5 个 epoch 验证一次
 
 Dataset:
   target: dataloader.DataModuleFromConfig
-  batch_size: 8
+  batch_size: 1
   num_workers: 0
   train:
     _target_: dataset.MyDataset
     data_dir: 'D:\Downloads\medical'
     mode: train
-    length: 16
+    length: 1             # 2D 卷积就把这里设为 1 (目前 3D 卷积还在 dev 阶段)
     augment: false
-    size: [32, 32]
+    size: [32, 32]        # 这个参数目前只支持 3D 卷积, 2D 卷积会无视这个参数
+    original: false       # debug 用的, 日常保持 False 就好
+    use_metadata: true
   val:
     _target_: dataset.MyDataset
     data_dir: ${Dataset.train.data_dir}
     mode: val
     length: ${Dataset.train.length}
-    augment: false
+    augment: ${Dataset.train.augment}
     size: ${Dataset.train.size}
+    original: ${Dataset.train.original}
+    use_metadata: ${Dataset.train.use_metadata}
   test:
     _target_: dataset.MyDataset
     data_dir: ${Dataset.train.data_dir}
     mode: test
     length: ${Dataset.train.length}
-    augment: false
+    augment: ${Dataset.train.augment}
     size: ${Dataset.train.size}
+    original: ${Dataset.train.original}
+    use_metadata: ${Dataset.train.use_metadata}
 
 UNet:
   _target_: UNet.UNet
   im_channels: ${Dataset.train.length}
-  down_channels: [32, 64, 128]
-  down_sample: [true, true, false]
+  down_channels: [32, 64, 128, 256]
+  down_sample: [true, true, true, false]
   num_heads: 4
   num_down_layers: 1
   num_mid_layers: 1

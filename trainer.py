@@ -5,7 +5,7 @@ from hydra.utils import instantiate
 from dataloader import DataModuleFromConfig
 import datetime, argparse, os, glob
 import lightning as L
-from lightning.pytorch.loggers import WandbLogger   # 用来实例化 wandb_logger 的
+from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint # 用来实例化 checkpoint_callback 的
 from UNet import UNet
 from utils import get_latest_checkpoint, CheckpointCleanupCallback
@@ -28,19 +28,29 @@ if __name__ == '__main__':
     # 准备模型
     unet = instantiate(config.UNet)
 
-    # 配置 wandb
-    wandb_logger = WandbLogger(
-        # Team 名称
-        entity='Error_666',
-        # 项目名称
-        project='medical',
-        # 运行名称 (便于在运行列表中识别)
-        name=now,
-        # 运行的 ID (便于在域名中识别, id 不能重复, 重复会有奇怪的 bug)
-        id=now,
-        # 要记录的 metadata     可以通过 run.config.update() 追加
-        config=OmegaConf.to_container(config, resolve=True),
-    )
+    logger = config.Trainer.logger
+    if logger == 'wandb':
+        # 配置 wandb
+        logger = WandbLogger(
+            # Team 名称
+            entity='Error_666',
+            # 项目名称
+            project='medical',
+            # 运行名称 (便于在运行列表中识别)
+            name=now,
+            # 运行的 ID (便于在域名中识别, id 不能重复, 重复会有奇怪的 bug)
+            id=now,
+            # 要记录的 metadata     可以通过 run.config.update() 追加
+            config=OmegaConf.to_container(config, resolve=True),
+        )
+    elif logger == 'tensorboard':
+        logger = TensorBoardLogger(
+            save_dir=os.path.join(config.Trainer.exp_dir, 'tensorboard'),  # 日志根目录
+            name='0',             # 子文件夹名，也可以用 now
+            version=now           # run 的版本号，方便区分
+        )
+    else:
+        logger = False
 
     # 定期保存 ckpt
     ckpt_dir = os.path.join(config.Trainer.exp_dir, 'checkpoints')
@@ -74,10 +84,11 @@ if __name__ == '__main__':
             os.remove(ckpt_file)
 
     trainer = L.Trainer(
-        logger=wandb_logger,
+        logger=logger,
         max_epochs=config.Trainer.max_epochs,
         log_every_n_steps=config.Trainer.log_every_n_steps,    # 每 x 个 step 打一次 训练log
         check_val_every_n_epoch=config.Trainer.check_val_every_n_epoch,  # 每 x 个 epoch 验证一次
+        precision=16,   # 开 fp16 精度训练
         callbacks=[
             checkpoint_callback,
             CheckpointCleanupCallback(ckpt_dir, config.Trainer.ckpt_save_num),

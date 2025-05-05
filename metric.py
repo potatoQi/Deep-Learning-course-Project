@@ -4,24 +4,29 @@ import torch
 from dataset import get_data
 import torch.nn.functional as F
 from tqdm import tqdm
+from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
+import wandb
 
 class CustomMetricCallback(Callback):
     def __init__(self):
         super().__init__()
         self.dice_list = []
+        self.fake_label_list = []
+        self.real_label_list = []
+        self.img_tim = 0
 
     @torch.no_grad()
-    def cal(self, pl_module, batch):
+    def cal_3D(self, pl_module, batch):
         x_path = batch['feature_path']  # [b]
         y_path = batch['label_path']    # [b]
-        chunk_size = batch['length'][0]
-        size = batch['size'][0]
+        chunk_size = batch['length'][0]         # 要切的长度: 16
+        size = batch['size'][0]                 # list: [h, w]
         target_h, target_w = size[0], size[1]
 
         with tqdm(total=len(x_path), desc=f"Processing batches", unit="batch") as pbar1:
             for i in range(len(x_path)):
-                x_data = get_data(x_path[i], use_simpleitk=True)
-                y_data = get_data(y_path[i], use_simpleitk=True)
+                x_data = get_data(x_path[i], use_simpleitk=True)    # [c h w]
+                y_data = get_data(y_path[i], use_simpleitk=True)    # [c h w]
 
                 y_data[y_data == 2] = 1
 
@@ -110,18 +115,56 @@ class CustomMetricCallback(Callback):
                 self.dice_list.append(xx / yy)
 
     @torch.no_grad()
+    def cal_2D(self, pl_module, batch):
+        x_data = batch['feature'].to(pl_module.device)  # [b c h w]
+        y_data = batch['label'].to(pl_module.device)    # [b c h w]
+        logits = pl_module(x_data)  # [b c h w]
+        pred = torch.sigmoid(logits)
+
+        coi_w = ((pred > 0.5) & (y_data == 1)).float().sum()
+        pred_w = (pred > 0.5).float().sum()
+        gt_w = y_data.sum()
+        dice = 2 * coi_w / (pred_w + gt_w + 1e-6)
+        self.dice_list.append(dice.item())
+
+        self.img_tim += 1
+        if self.img_tim <= 10:
+            self.fake_label_list.append((pred > 0.5)[0].cpu().numpy())     # [c h w]
+            self.real_label_list.append(y_data[0].cpu().numpy())           # [c h w]
+
+    @torch.no_grad()
     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None):
-        self.cal(pl_module, batch)
+        # self.cal_3D(pl_module, batch)
+        self.cal_2D(pl_module, batch)
 
     @torch.no_grad()
     def on_validation_epoch_end(self, trainer, pl_module):
         mean_dice = sum(self.dice_list) / len(self.dice_list)
-        self.dice_list = []
         self.log('val_dice', mean_dice, prog_bar=True, on_step=False, on_epoch=True)
+
+        fake_np = np.stack(self.fake_label_list, axis=0)  # [N, C, H, W]
+        real_np = np.stack(self.real_label_list, axis=0)
+        logger = trainer.logger
+        if isinstance(logger, WandbLogger):
+            wb = logger.experiment
+            wb.log({
+                "val_fake_images": [wandb.Image(img) for img in fake_np],
+                "val_real_images": [wandb.Image(img) for img in real_np],
+            }, step=trainer.current_epoch)
+        elif isinstance(logger, TensorBoardLogger):
+            tb = logger.experiment
+            tb.add_images("val/fake", fake_np, trainer.current_epoch, dataformats="NCHW")
+            tb.add_images("val/real", real_np, trainer.current_epoch, dataformats="NCHW")
+
+        self.dice_list = []
+        self.fake_label_list = []
+        self.real_label_list = []
+        self.img_tim = 0
     
     @torch.no_grad()
     def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None):
-        self.cal(pl_module, batch)
+        # self.cal_3D(pl_module, batch)
+        self.cal_2D(pl_module, batch)
 
     @torch.no_grad()
     def on_test_epoch_end(self, trainer, pl_module):

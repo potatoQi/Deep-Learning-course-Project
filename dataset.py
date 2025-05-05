@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import SimpleITK as sitk
 import nibabel as nib
-import os
+import os, pickle
 from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
 import torchvision.transforms as T
@@ -27,14 +27,13 @@ def display_slice(image_data, slice_index):
     plt.title(f"Slice {slice_index}")
     plt.show()
 
-def display_image(image_data, slice_index):
-    assert 0 <= slice_index < image_data.shape[0], "Slice index out of range"
-    slice_index = len(image_data) - 2
-    display_slice(image_data, slice_index)
-
-    slice_image = image_data[slice_index, :, :]
-    plt.imshow(slice_image, cmap='gray')
-    plt.title(f"Original Slice {slice_index}")
+def display_image(image_data, slice_index=None):
+    if image_data.ndim == 3:
+        assert 0 <= slice_index < image_data.shape[0], "Slice index out of range"
+        display_slice(image_data, slice_index)
+    else:
+        plt.imshow(image_data, cmap='gray')
+        plt.show()
 
 # 处理 NIfTI 文件并显示
 def get_data(file_path, use_simpleitk=True):
@@ -54,15 +53,29 @@ class MyDataset(Dataset):
         length=16,
         augment=False,
         size=[32,32],
+        original=False,
+        use_metadata=True,
     ):
         self.data_dir = data_dir
         self.mode = mode
         self.length = length
         self.augment = augment
         self.size = size
+        self.original = original
+        self.use_metadata = use_metadata
         self._load_metadata()
 
     def _load_metadata(self):
+        os.makedirs('metadata', exist_ok=True)
+        metadata_name = 'metadata/metadata_' + self.mode + '.pkl'
+        if self.use_metadata:
+            try:
+                with open(metadata_name, 'rb') as f:
+                    self.x_list, self.y_list = pickle.load(f)
+                print(f'从{metadata_name}中加载了{len(self.x_list)}条数据')
+                return
+            except:
+                print(f'{metadata_name}没找到, 开始重新计算')
         self.features_dir = os.path.join(self.data_dir, 'imagesTr')
         self.labels_dir = os.path.join(self.data_dir, 'labelsTr')
         # 读取 self.features_dir 和 self.labels_dir 下的文件名
@@ -90,20 +103,40 @@ class MyDataset(Dataset):
             raise ValueError(f"Invalid mode: {self.mode}")
         assert len(self.x_list) == len(self.y_list), "Feature and label lists must have the same length."
 
+        # 把 3D 图像展开为若干 2D 图像, 并只保存 label 非全零的 pairs
+        x_list_t = []
+        y_list_t = []
+        for i in range(len(self.x_list)):
+            x_path = self.x_list[i]
+            y_path = self.y_list[i]
+            y_data = get_data(y_path, use_simpleitk=True)
+            y_data[y_data == 2] = 1
+            for j in range(y_data.shape[0]):
+                y_label = y_data[j, :, :]       # [H W]
+                if y_label.sum() > 0:
+                    x_list_t.append(x_path + '@' + str(j))
+                    y_list_t.append(y_path + '@' + str(j))
+        self.x_list = x_list_t
+        self.y_list = y_list_t
+
+        with open(metadata_name, 'wb') as f:
+            pickle.dump((self.x_list, self.y_list), f)
+        print(f'共加载了数据{len(self.x_list)}条到{metadata_name}里')
+
     def __len__(self):
         return len(self.x_list)
 
     def __getitem__(self, idx):
         # 读取数据
-        x_path = self.x_list[idx]
-        y_path = self.y_list[idx]
-        x_data = get_data(x_path, use_simpleitk=True)
-        y_data = get_data(y_path, use_simpleitk=True)
+        x_path, x_slice_str = self.x_list[idx].split('@')
+        y_path, y_slice_str = self.y_list[idx].split('@')
+        x_data = get_data(x_path, use_simpleitk=True)[int(x_slice_str), :, :]   # [H W]
+        y_data = get_data(y_path, use_simpleitk=True)[int(y_slice_str), :, :]   # [H W]
 
-        t, h, w = x_data.shape
+        h, w = x_data.shape
         if h != 512 or w != 512:
             raise ValueError(f"Image shape is not (x, 512, 512), but {x_data.shape}")
-        t, h, w = y_data.shape
+        h, w = y_data.shape
         if h != 512 or w != 512:
             raise ValueError(f"Label shape is not (x, 512, 512), but {y_data.shape}")
         
@@ -111,21 +144,33 @@ class MyDataset(Dataset):
         # 此时: 0: 背景, 1: 肝脏
         y_data[y_data == 2] = 1
 
-        # 长度裁剪到 self.length
-        assert self.length <= x_data.shape[0], f"Length {self.length} is larger than image depth {x_data.shape[0]}."
-        if self.mode == 'train':
-            # random 裁剪
-            start_idx = np.random.randint(0, x_data.shape[0] - self.length + 1)
-            end_idx = start_idx + self.length
-            x_data = x_data[start_idx:end_idx, :, :]
-            y_data = y_data[start_idx:end_idx, :, :]
-        else:
-            # 验证集和测试集其实不会用到 __getitem__ 的逻辑
-            x_data = x_data[:self.length, :, :]
-            y_data = y_data[:self.length, :, :]
+        if self.original:
+            res = {
+                'feature': x_data,
+                'label': y_data,
+                'feature_path': x_path,
+                'label_path': y_path,
+                'length': self.length,
+                'size': list(self.size),
+            }
+            return res
 
-        # 尺寸裁剪到 self.size
-        x_data, y_data = self.resize(x_data, y_data, self.size)
+        if x_data.ndim == 3:
+            # 长度裁剪到 self.length
+            assert self.length <= x_data.shape[0], f"Length {self.length} is larger than image depth {x_data.shape[0]}."
+            if self.mode == 'train':
+                # random 裁剪
+                start_idx = np.random.randint(0, x_data.shape[0] - self.length + 1)
+                end_idx = start_idx + self.length
+                x_data = x_data[start_idx:end_idx, :, :]
+                y_data = y_data[start_idx:end_idx, :, :]
+            else:
+                # 验证集和测试集其实不会用到 __getitem__ 的逻辑
+                x_data = x_data[:self.length, :, :]
+                y_data = y_data[:self.length, :, :]
+
+            # 尺寸裁剪到 self.size
+            x_data, y_data = self.resize(x_data, y_data, self.size)
 
         # 对 features 进行归一化
         # TODO: 目前这里只是实现了一个简单的 [-1, 1] 归一化配合固定值截断, 是否还有更好的方式
@@ -142,8 +187,8 @@ class MyDataset(Dataset):
         y_data = torch.tensor(y_data).float()
 
         res = {
-            'feature': x_data,
-            'label': y_data,
+            'feature': x_data.unsqueeze(0),
+            'label': y_data.unsqueeze(0),
             'feature_path': x_path,
             'label_path': y_path,
             'length': self.length,
@@ -189,12 +234,23 @@ if __name__ == '__main__':
     dataset = MyDataset(
         data_dir='D:\Downloads\medical',
         mode='train',
+        length=16,
+        augment=False,
+        size=[32, 32],
+        original=True,
+        use_metadata=True,
     )
-
-    base_features_path = 'D:\Downloads\medical\imagesTr'
-    base_labels_path = 'D:\Downloads\medical\labelsTr'
-
-    t1 = get_data(os.path.join(base_features_path, 'liver_0.nii.gz'), use_simpleitk=True)   # [75 512 512]
-    display_image(t1, 0)
-    t2 = get_data(os.path.join(base_labels_path, 'liver_0.nii.gz'), use_simpleitk=True)     # [75 512 512]
-    display_image(t2, 0)
+    # base_features_path = 'D:\Downloads\medical\imagesTr'
+    # base_labels_path = 'D:\Downloads\medical\labelsTr'
+    # t1 = get_data(os.path.join(base_features_path, 'liver_0.nii.gz'), use_simpleitk=True)   # [75 512 512]
+    # display_image(t1, 0)
+    # t2 = get_data(os.path.join(base_labels_path, 'liver_0.nii.gz'), use_simpleitk=True)     # [75 512 512]
+    # display_image(t2, 0)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+    for step, batch in enumerate(dataloader):
+        x_data = batch['feature'].squeeze()
+        y_data = batch['label'].squeeze()
+        print(x_data.shape, y_data.shape, y_data.sum())
+        display_image(x_data)
+        display_image(y_data)
+        raise
