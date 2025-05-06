@@ -32,7 +32,6 @@ def window_image(image, window_width=400, window_level=50):
 
     return image
 
-
 # 读取 NIfTI 文件 (.nii.gz) 使用 SimpleITK
 def read_nifti_with_simpleitk(file_path):
     # 使用 SimpleITK 读取 NIfTI 文件
@@ -138,15 +137,15 @@ class MyDataset(Dataset):
             x_list = [os.path.join(self.features_dir, f) for f in os.listdir(self.features_dir)]
             y_list = [os.path.join(self.labels_dir, f) for f in os.listdir(self.labels_dir)]
 
-            # 拿取前 70% 数据
-            num_train = int(len(x_list) * 0.7)
+            # 拿取前 80% 数据
+            num_train = int(len(x_list) * 0.8)
             x_list_train = x_list[:num_train]
             y_list_train = y_list[:num_train]
 
             process_data(rootx, x_list_train, y_list_train)
 
-            # 拿取中 20% 数据
-            num_val = int(len(x_list) * 0.2)
+            # 拿取中 10% 数据
+            num_val = int(len(x_list) * 0.1)
             x_list_val = x_list[num_train:num_train + num_val]
             y_list_val = y_list[num_train:num_train + num_val]
 
