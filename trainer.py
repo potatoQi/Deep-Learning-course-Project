@@ -63,9 +63,10 @@ if __name__ == '__main__':
         save_top_k=-1,  # 保存所有检查点, 自定义的 CheckpointCleanupCallback 会删除多余的检查点
     )
 
+    last_config_path = os.path.join(config.Trainer.exp_dir, 'last_config.yaml')
     last_config = None
-    if os.path.exists('last_config.yaml'):
-        with open('last_config.yaml', 'r') as f:
+    if os.path.exists(last_config_path):
+        with open(last_config_path, 'r') as f:
             last_config = OmegaConf.load(f)
     latest_checkpoint = None
     if config.Trainer.use_ckpt:
@@ -74,7 +75,7 @@ if __name__ == '__main__':
             print('配置与上次一样, 加载的检查点:', latest_checkpoint)
         else:
             print('配置与上次不同, 正在重新训练...')
-            OmegaConf.save(config, 'last_config.yaml')
+            OmegaConf.save(config, last_config_path)
             ckpt_files = glob.glob(os.path.join(ckpt_dir, '*.ckpt'))
             for ckpt_file in ckpt_files:
                 os.remove(ckpt_file)
@@ -88,7 +89,6 @@ if __name__ == '__main__':
         max_epochs=config.Trainer.max_epochs,
         log_every_n_steps=config.Trainer.log_every_n_steps,    # 每 x 个 step 打一次 训练log
         check_val_every_n_epoch=config.Trainer.check_val_every_n_epoch,  # 每 x 个 epoch 验证一次
-        precision=16,   # 开 fp16 精度训练
         callbacks=[
             checkpoint_callback,
             CheckpointCleanupCallback(ckpt_dir, config.Trainer.ckpt_save_num),

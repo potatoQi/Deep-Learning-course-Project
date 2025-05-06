@@ -1,6 +1,6 @@
 Trainer:
   seed: 123
-  exp_dir: './results/0'            # 训练结果保存路径 (ckpt, log (wandb 会保存在根目录), etc.)
+  exp_dir: './results/3'            # 训练结果保存路径 (ckpt, log (wandb 会保存在根目录), etc.)
   logger: tensorboard                     # wandb / tensorboard / null
   use_ckpt: true
   ckpt_save_num: 1                  # 保留最新的 x 个 ckpt
@@ -53,7 +53,7 @@ UNet:
   down_channels: [32, 64, 128, 256]
   down_sample: [true, true, true, false]
   num_heads: 4
-  num_down_layers: 1
-  num_mid_layers: 1
-  num_up_layers: 1
+  num_down_layers: 4
+  num_mid_layers: 4
+  num_up_layers: 4
   lr: 1e-4

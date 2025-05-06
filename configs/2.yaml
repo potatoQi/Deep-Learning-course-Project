@@ -1,11 +1,11 @@
 Trainer:
   seed: 123
-  exp_dir: './results/0'            # 训练结果保存路径 (ckpt, log (wandb 会保存在根目录), etc.)
+  exp_dir: './results/2'            # 训练结果保存路径 (ckpt, log (wandb 会保存在根目录), etc.)
   logger: tensorboard                     # wandb / tensorboard / null
   use_ckpt: true
   ckpt_save_num: 1                  # 保留最新的 x 个 ckpt
   ckpt_save_interval: 5             # x 个 epoch 保存一次 ckpt
-  max_epochs: 10
+  max_epochs: 20
   log_every_n_steps: 1              # 每 1 步 step 打印一次训练指标
   check_val_every_n_epoch: 1        # 每 x 个 epoch 验证一次
 

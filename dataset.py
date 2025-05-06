@@ -2,10 +2,11 @@ import torch
 import numpy as np
 import SimpleITK as sitk
 import nibabel as nib
-import os, pickle
+import os, pickle, random
 from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
 import torchvision.transforms as T
+import torchvision.transforms.functional as F
 
 # 读取 NIfTI 文件 (.nii.gz) 使用 SimpleITK
 def read_nifti_with_simpleitk(file_path):
@@ -67,6 +68,8 @@ class MyDataset(Dataset):
         self.use_metadata = use_metadata
         self.debug = debug
         self.accelerate = accelerate
+
+        assert not (accelerate and use_metadata), 'accelerate 和 use_metadata 不能同时为 True, 选择其中一种加速方式即可'
         self._load_metadata()
 
     def _load_metadata(self):
@@ -247,10 +250,10 @@ class MyDataset(Dataset):
         # 对 x_data 进行数据增强
         # TODO: 这里目前简单实现了一下, 但是我们需要参考: https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py 的 643 ~ 673 行的实现方式
         if self.augment:
-            x_data = self.augment_data(x_data)
-
-        x_data = torch.tensor(x_data).float()
-        y_data = torch.tensor(y_data).float()
+            x_data, y_data = self.augment_data(x_data, y_data)
+        else:
+            x_data = torch.tensor(x_data).float()
+            y_data = torch.tensor(y_data).float()
 
         res = {
             'feature': x_data.unsqueeze(0),
@@ -283,27 +286,26 @@ class MyDataset(Dataset):
         
         return x_data, y_data
     
-    def augment_data(self, x_data):
-        # 定义数据增强的变换
-        transform = T.Compose([
-            T.RandomHorizontalFlip(p=0.5),  # 50% 概率进行水平翻转
-            T.RandomVerticalFlip(p=0.5),    # 50% 概率进行垂直翻转
-            T.RandomRotation(30),           # 随机旋转，最大旋转角度为 30°
-            T.RandomAffine(degrees=0, translate=(0.1, 0.1)),  # 随机平移
-        ])
-
-        x_data = torch.tensor(x_data).float()
-        x_data = transform(x_data)
-        return x_data
+    def augment_data(self, x_data, y_data):
+        # x_data, y_data 都是 ndarray, x_data 在 [-1, 1] 之间, y_data 是 0/1, shape 都是 [H W]
+        x = torch.tensor(x_data).float()
+        y = torch.tensor(y_data).float()
+        if random.random() < 0.5:
+            x = F.hflip(x)
+            y = F.hflip(y)
+        if random.random() < 0.5:
+            x = F.vflip(x)
+            y = F.vflip(y)
+        return x, y
 
 if __name__ == '__main__':
     dataset = MyDataset(
         data_dir='D:\Downloads\medical',
         mode='train',
         length=16,
-        augment=False,
+        augment=True,
         size=[32, 32],
-        original=True,
+        original=False,
         use_metadata=False,
         debug=True,
         accelerate=True,
