@@ -1,6 +1,5 @@
 import lightning as L
 from torch.utils.data import DataLoader
-from dataset import MyDataset
 from hydra.utils import instantiate
 
 class DataModuleFromConfig(L.LightningDataModule):

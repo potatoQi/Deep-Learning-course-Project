@@ -3,7 +3,7 @@ import numpy as np
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
 from dataloader import DataModuleFromConfig
-import datetime, argparse, os, glob
+import datetime, os, glob
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint # 用来实例化 checkpoint_callback 的

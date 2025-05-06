@@ -5,7 +5,6 @@ import nibabel as nib
 import os, pickle, random
 from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
-import torchvision.transforms as T
 import torchvision.transforms.functional as F
 
 # 读取 NIfTI 文件 (.nii.gz) 使用 SimpleITK
