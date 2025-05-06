@@ -40,7 +40,7 @@ UNet:
   im_channels: 3
   down_channels: [32, 64, 128]
   down_sample: [true, true, false]
-  num_heads: 2 # 4 注释的是之前的 4 效果差一点 可能是过拟合的原因
+  num_heads: 4
   num_down_layers: 1
   num_mid_layers: 1
   num_up_layers: 1
