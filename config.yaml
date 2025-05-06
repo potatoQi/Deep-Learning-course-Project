@@ -22,6 +22,8 @@ Dataset:
     size: [32, 32]        # 这个参数目前只支持 3D 卷积, 2D 卷积会无视这个参数
     original: false       # debug 用的, 日常保持 False 就好
     use_metadata: true
+    debug: false
+    accelerate: false     # 是否将数据集转换为 npy 到本地加速读取
   val:
     _target_: dataset.MyDataset
     data_dir: ${Dataset.train.data_dir}
@@ -31,6 +33,8 @@ Dataset:
     size: ${Dataset.train.size}
     original: ${Dataset.train.original}
     use_metadata: ${Dataset.train.use_metadata}
+    debug: ${Dataset.train.debug}
+    accelerate: ${Dataset.train.accelerate}
   test:
     _target_: dataset.MyDataset
     data_dir: ${Dataset.train.data_dir}
@@ -40,6 +44,8 @@ Dataset:
     size: ${Dataset.train.size}
     original: ${Dataset.train.original}
     use_metadata: ${Dataset.train.use_metadata}
+    debug: ${Dataset.train.debug}
+    accelerate: ${Dataset.train.accelerate}
 
 UNet:
   _target_: UNet.UNet

@@ -55,6 +55,8 @@ class MyDataset(Dataset):
         size=[32,32],
         original=False,
         use_metadata=True,
+        debug=False,
+        accelerate=False,
     ):
         self.data_dir = data_dir
         self.mode = mode
@@ -63,19 +65,39 @@ class MyDataset(Dataset):
         self.size = size
         self.original = original
         self.use_metadata = use_metadata
+        self.debug = debug
+        self.accelerate = accelerate
         self._load_metadata()
 
     def _load_metadata(self):
-        os.makedirs('metadata', exist_ok=True)
-        metadata_name = 'metadata/metadata_' + self.mode + '.pkl'
-        if self.use_metadata:
+        if self.accelerate:
+            os.makedirs('data', exist_ok=True)
+            metadata_name = 'data/metadata_' + self.mode + '.pkl'
             try:
                 with open(metadata_name, 'rb') as f:
                     self.x_list, self.y_list = pickle.load(f)
+                if self.debug:
+                    self.x_list = self.x_list[:10]
+                    self.y_list = self.y_list[:10]
                 print(f'从{metadata_name}中加载了{len(self.x_list)}条数据')
                 return
             except:
                 print(f'{metadata_name}没找到, 开始重新计算')
+
+        if self.use_metadata and not self.accelerate:
+            os.makedirs('metadata', exist_ok=True)
+            metadata_name = 'metadata/metadata_' + self.mode + '.pkl'
+            try:
+                with open(metadata_name, 'rb') as f:
+                    self.x_list, self.y_list = pickle.load(f)
+                if self.debug:
+                    self.x_list = self.x_list[:10]
+                    self.y_list = self.y_list[:10]
+                print(f'从{metadata_name}中加载了{len(self.x_list)}条数据')
+                return
+            except:
+                print(f'{metadata_name}没找到, 开始重新计算')
+
         self.features_dir = os.path.join(self.data_dir, 'imagesTr')
         self.labels_dir = os.path.join(self.data_dir, 'labelsTr')
         # 读取 self.features_dir 和 self.labels_dir 下的文件名
@@ -119,19 +141,63 @@ class MyDataset(Dataset):
         self.x_list = x_list_t
         self.y_list = y_list_t
 
-        with open(metadata_name, 'wb') as f:
-            pickle.dump((self.x_list, self.y_list), f)
-        print(f'共加载了数据{len(self.x_list)}条到{metadata_name}里')
+        if self.debug:
+            self.x_list = self.x_list[:10]
+            self.y_list = self.y_list[:10]
+
+        if self.accelerate:
+            cache_root = os.path.join('data', self.mode)
+            img_cache_dir = os.path.join(cache_root, 'images')
+            label_cache_dir = os.path.join(cache_root, 'labels')
+            os.makedirs(img_cache_dir, exist_ok=True)
+            os.makedirs(label_cache_dir, exist_ok=True)
+            new_x_list = []
+            new_y_list = []
+            for x_meta, y_meta in zip(self.x_list, self.y_list):
+                x_path, slice_idx = x_meta.split('@')
+                y_path, _  = y_meta.split('@')
+                si = int(slice_idx)
+                x_data = get_data(x_path, use_simpleitk=True)[si, :, :]   # [H W]
+                y_data = get_data(y_path, use_simpleitk=True)[si, :, :]   # [H W]
+  
+                # 保存为 .npy 文件
+                base_x = os.path.splitext(os.path.basename(x_path))[0] + '_image'  # liver_0_image
+                base_y = os.path.splitext(os.path.basename(y_path))[0] + '_label'  # liver_0_label
+                img_file = os.path.join(img_cache_dir, f"{base_x}_{si}.npy")
+                label_file = os.path.join(label_cache_dir, f"{base_y}_{si}.npy")
+                np.save(img_file, x_data)
+                np.save(label_file, y_data)
+
+                new_x_list.append(img_file)
+                new_y_list.append(label_file)
+            self.x_list = new_x_list
+            self.y_list = new_y_list
+            
+            with open(metadata_name, 'wb') as f:
+                pickle.dump((self.x_list, self.y_list), f)
+            print(f'共加载了数据{len(self.x_list)}条到{metadata_name}里')
+            return
+
+        if self.use_metadata and not self.accelerate:
+            with open(metadata_name, 'wb') as f:
+                pickle.dump((self.x_list, self.y_list), f)
+            print(f'共加载了数据{len(self.x_list)}条到{metadata_name}里')
 
     def __len__(self):
         return len(self.x_list)
 
     def __getitem__(self, idx):
         # 读取数据
-        x_path, x_slice_str = self.x_list[idx].split('@')
-        y_path, y_slice_str = self.y_list[idx].split('@')
-        x_data = get_data(x_path, use_simpleitk=True)[int(x_slice_str), :, :]   # [H W]
-        y_data = get_data(y_path, use_simpleitk=True)[int(y_slice_str), :, :]   # [H W]
+        if self.accelerate:
+            x_path = self.x_list[idx]  # e.g. data\train\images\liver_0.nii_image_45.npy
+            y_path = self.y_list[idx]
+            x_data = np.load(x_path)   # [H, W]
+            y_data = np.load(y_path)   # [H, W]
+        else:
+            x_path, x_slice_str = self.x_list[idx].split('@')
+            y_path, y_slice_str = self.y_list[idx].split('@')
+            x_data = get_data(x_path, use_simpleitk=True)[int(x_slice_str), :, :]   # [H W]
+            y_data = get_data(y_path, use_simpleitk=True)[int(y_slice_str), :, :]   # [H W]
 
         h, w = x_data.shape
         if h != 512 or w != 512:
@@ -238,19 +304,15 @@ if __name__ == '__main__':
         augment=False,
         size=[32, 32],
         original=True,
-        use_metadata=True,
+        use_metadata=False,
+        debug=True,
+        accelerate=True,
     )
-    # base_features_path = 'D:\Downloads\medical\imagesTr'
-    # base_labels_path = 'D:\Downloads\medical\labelsTr'
-    # t1 = get_data(os.path.join(base_features_path, 'liver_0.nii.gz'), use_simpleitk=True)   # [75 512 512]
-    # display_image(t1, 0)
-    # t2 = get_data(os.path.join(base_labels_path, 'liver_0.nii.gz'), use_simpleitk=True)     # [75 512 512]
-    # display_image(t2, 0)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
     for step, batch in enumerate(dataloader):
-        x_data = batch['feature'].squeeze()
-        y_data = batch['label'].squeeze()
-        print(x_data.shape, y_data.shape, y_data.sum())
-        display_image(x_data)
-        display_image(y_data)
+        x_data = batch['feature']
+        y_data = batch['label']
+        display_image(x_data.squeeze())
+        display_image(y_data.squeeze())
         raise
