@@ -7,9 +7,10 @@ from einops import rearrange
 from loss import DiceLoss
 
 class DownBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, down_sample, num_heads, num_layers=1):
+    def __init__(self, in_channels, out_channels, down_sample, num_heads, num_layers=1, use_attn=True):
         super().__init__()
         self.num_layers = num_layers
+        self.use_attn = use_attn
     
         self.resnet_conv_1 = nn.ModuleList([
             nn.Sequential(
@@ -34,7 +35,7 @@ class DownBlock(nn.Module):
             nn.GroupNorm(8, out_channels) for _ in range(num_layers)
         ])
         self.attention_layers = nn.ModuleList([
-            nn.MultiheadAttention(out_channels, num_heads, batch_first=True) for _ in range(num_layers)
+            nn.MultiheadAttention(out_channels, num_heads, batch_first=True) if use_attn else nn.Identity() for _ in range(num_layers)
         ])
         self.down_sample_cov = nn.Conv2d(out_channels, out_channels, kernel_size=4, stride=2, padding=1) if down_sample else nn.Identity()
 
@@ -49,9 +50,10 @@ class DownBlock(nn.Module):
             b, c, h, w = x.shape
             res = x
             x = self.norm_layers[i](x)
-            x = rearrange(x, 'b c h w -> b (h w) c')
-            x = self.attention_layers[i](x, x, x)[0]
-            x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
+            if self.use_attn:
+                x = rearrange(x, 'b c h w -> b (h w) c')
+                x = self.attention_layers[i](x, x, x)[0]
+                x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
             x = res + x
         x = self.down_sample_cov(x)
         return x
@@ -111,9 +113,10 @@ class MidBlock(nn.Module):
         return x
     
 class UpBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, up_sample, num_heads, num_layers=1):
+    def __init__(self, in_channels, out_channels, up_sample, num_heads, num_layers=1, use_attn=True):
         super().__init__()
         self.num_layers = num_layers
+        self.use_attn = use_attn
 
         self.up_sample_conv = nn.ConvTranspose2d(in_channels // 2, in_channels // 2, kernel_size=4, stride=2, padding=1) if up_sample else nn.Identity()
 
@@ -140,7 +143,7 @@ class UpBlock(nn.Module):
             nn.GroupNorm(8, out_channels) for _ in range(num_layers)
         ])
         self.attention_layers = nn.ModuleList([
-            nn.MultiheadAttention(out_channels, num_heads, batch_first=True) for _ in range(num_layers)
+            nn.MultiheadAttention(out_channels, num_heads, batch_first=True) if use_attn else nn.Identity() for _ in range(num_layers)
         ])
 
     def forward(self, x, out_down):
@@ -158,9 +161,10 @@ class UpBlock(nn.Module):
             b, c, h, w = x.shape
             res = x
             x = self.norm_layers[i](x)
-            x = rearrange(x, 'b c h w -> b (h w) c')
-            x = self.attention_layers[i](x, x, x)[0]
-            x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
+            if self.use_attn:
+                x = rearrange(x, 'b c h w -> b (h w) c')
+                x = self.attention_layers[i](x, x, x)[0]
+                x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
             x = res + x
 
         return x
@@ -178,11 +182,8 @@ class UNet(L.LightningModule):
         num_down_layers=1,
         num_mid_layers=1,
         num_up_layers=1,
-
-        num_classes=2, # 二分类
-
+        num_cls=2,
         lr=1e-4,
-        loss_fn=DiceLoss, # 混合损失函数
     ):
         super().__init__()
         self.lr = lr
@@ -199,7 +200,8 @@ class UNet(L.LightningModule):
                 out_channels=down_channels[i] * 2,
                 down_sample=down_sample[i],
                 num_heads=num_heads,
-                num_layers=num_down_layers
+                num_layers=num_down_layers,
+                use_attn=True if i == len(down_channels) - 1 else False
             ) for i in range(len(down_channels))
         ])
         self.mids = nn.ModuleList([
@@ -216,15 +218,14 @@ class UNet(L.LightningModule):
                 out_channels=down_channels[i-1] if i != 0 else down_channels[0],
                 up_sample=down_sample[i],
                 num_heads=num_heads,
-                num_layers=num_up_layers
+                num_layers=num_up_layers,
+                use_attn=True if i == len(down_channels) - 1 else False
             ) for i in reversed(range(len(down_channels)))
         ])
         self.norm = nn.GroupNorm(8, down_channels[0])
         self.silu = nn.SiLU()
-        # self.conv_out = nn.Conv2d(down_channels[0], im_channels, kernel_size=3, stride=1, padding=1)
-        # self.loss_fn = nn.BCEWithLogitsLoss()   # 二元交叉熵损失
-        self.conv_out = nn.Conv2d(down_channels[0], num_classes, kernel_size=3, stride=1, padding=1) 
-        self.loss_fn = loss_fn() # 改用混合损失函数
+        self.conv_out = nn.Conv2d(down_channels[0], num_cls, kernel_size=3, stride=1, padding=1)
+        self.loss_fn = DiceLoss() 
     
     def training_step(self, batch, batch_idx):
         x = batch['feature']    # [b c h w]
@@ -246,7 +247,7 @@ class UNet(L.LightningModule):
             x = block(x, down_outs.pop())
         x = self.norm(x)
         x = self.silu(x)
-        x = self.conv_out(x)    # [b class_num h w], logits
+        x = self.conv_out(x)    # [b c h w], logits
         return x
 
     # configure_optimizers 是 lightning model 必写的一个函数
