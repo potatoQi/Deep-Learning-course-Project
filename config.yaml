@@ -1,0 +1,47 @@
+Trainer:
+  seed: 666
+  exp_dir: 'results/1'
+  use_ckpt: false
+  ckpt_save_num: 1 # 保留最新的 2 个 ckpt
+  ckpt_save_interval: 5 # 5 个 epoch 保存一次 ckpt
+
+  max_epochs: 10
+  log_every_n_steps: 10 # 每 1 步 step 打印一次训练指标
+  check_val_every_n_epoch: 1 # 每 5 个 epoch 验证一次
+
+Dataset:
+  target: dataloader.DataModuleFromConfig
+  batch_size: 128
+  num_workers: 0
+  train:
+    _target_: dataset.MyDataset
+    data_dir: 'data'
+    mode: train
+    length: 1 # 这个指标没用到了
+    augment: false
+    size: [32, 32]
+  val:
+    _target_: dataset.MyDataset
+    data_dir: ${Dataset.train.data_dir}
+    mode: val
+    length: ${Dataset.train.length}
+    augment: false
+    size: ${Dataset.train.size}
+  test:
+    _target_: dataset.MyDataset
+    data_dir: ${Dataset.train.data_dir}
+    mode: test
+    length: ${Dataset.train.length}
+    augment: false
+    size: ${Dataset.train.size}
+
+UNet:
+  _target_: UNet.UNet
+  im_channels: 3
+  down_channels: [32, 64, 128]
+  down_sample: [true, true, false]
+  num_heads: 2 # 4 注释的是之前的 4 效果差一点 可能是过拟合的原因
+  num_down_layers: 1
+  num_mid_layers: 1
+  num_up_layers: 1
+  lr: 1e-4

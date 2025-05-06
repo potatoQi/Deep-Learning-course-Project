@@ -1,0 +1,6 @@
+/wandb/*
+/results/*
+/__pycache__/*
+/data
+/lightning_logs
+/nohup.out
