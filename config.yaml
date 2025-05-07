@@ -6,13 +6,13 @@ Trainer:
   ckpt_save_interval: 5 # 5 个 epoch 保存一次 ckpt
 
   max_epochs: 10
-  log_every_n_steps: 10 # 每 1 步 step 打印一次训练指标
+  log_every_n_steps: 100 # 每 1 步 step 打印一次训练指标
   check_val_every_n_epoch: 1 # 每 5 个 epoch 验证一次
 
 Dataset:
   target: dataloader.DataModuleFromConfig
-  batch_size: 128
-  num_workers: 0
+  batch_size: 1
+  num_workers: 5
   train:
     _target_: dataset.MyDataset
     data_dir: 'data'
@@ -37,10 +37,10 @@ Dataset:
 
 UNet:
   _target_: UNet.UNet
-  im_channels: 3
+  im_channels: 1
   down_channels: [32, 64, 128]
   down_sample: [true, true, false]
-  num_heads: 4
+  num_heads: 2
   num_down_layers: 1
   num_mid_layers: 1
   num_up_layers: 1

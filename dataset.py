@@ -16,6 +16,32 @@ from PIL import Image
 from torchvision import transforms
 
 
+from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAugmenter
+from batchgenerators.dataloading.nondet_multi_threaded_augmenter import NonDetMultiThreadedAugmenter
+from batchgenerators.dataloading.single_threaded_augmenter import SingleThreadedAugmenter
+from batchgenerators.utilities.file_and_folder_operations import join, load_json, isfile, save_json, maybe_mkdir_p
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar
+from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
+from batchgeneratorsv2.transforms.intensity.brightness import MultiplicativeBrightnessTransform
+from batchgeneratorsv2.transforms.intensity.contrast import ContrastTransform, BGContrast
+from batchgeneratorsv2.transforms.intensity.gamma import GammaTransform
+from batchgeneratorsv2.transforms.intensity.gaussian_noise import GaussianNoiseTransform
+from batchgeneratorsv2.transforms.nnunet.random_binary_operator import ApplyRandomBinaryOperatorTransform
+from batchgeneratorsv2.transforms.nnunet.remove_connected_components import \
+    RemoveRandomConnectedComponentFromOneHotEncodingTransform
+from batchgeneratorsv2.transforms.nnunet.seg_to_onehot import MoveSegAsOneHotToDataTransform
+from batchgeneratorsv2.transforms.noise.gaussian_blur import GaussianBlurTransform
+from batchgeneratorsv2.transforms.spatial.low_resolution import SimulateLowResolutionTransform
+from batchgeneratorsv2.transforms.spatial.mirroring import MirrorTransform
+from batchgeneratorsv2.transforms.spatial.spatial import SpatialTransform
+from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
+from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
+from batchgeneratorsv2.transforms.utils.nnunet_masking import MaskImageTransform
+from batchgeneratorsv2.transforms.utils.pseudo2d import Convert3DTo2DTransform, Convert2DTo3DTransform
+from batchgeneratorsv2.transforms.utils.random import RandomTransform
+from batchgeneratorsv2.transforms.utils.remove_label import RemoveLabelTansform
+from batchgeneratorsv2.transforms.utils.seg_to_regions import ConvertSegmentationToRegionsTransform
+
 # 调窗操作
 def window_image(image, window_width=400, window_level=50):
     """
@@ -110,7 +136,7 @@ class MyDataset(Dataset):
         length=16,
         augment=False,
         size=[512,512],
-        img_size=32,
+        img_size=512,
         reprocess = False,  ################## 这个变量是用来处理数据变成 png 格式的 第一次需要开启为True，之后就不需要了
         transform=None,
         seed=666,
@@ -185,7 +211,82 @@ class MyDataset(Dataset):
         label_pth = os.path.join(f"{self.root}/label", self.y_list[idx])
         x_data = Image.open(image_pth).convert("RGB")
         y_data = Image.open(label_pth).convert("L")
+        
+        self.iadvanced_transforms =[]
+        # 更可控的空间变换配置（同时作用于图像和分割标签，需保持几何一致性）
+        self.iadvanced_transforms.append(
+            SpatialTransform(
+                # 基础参数
+                (self.img_size, self.img_size),  # 输出图像尺寸（高度，宽度）
+                patch_center_dist_from_border=0,  # 采样中心点距离边缘的偏移（0表示从图像中心采样）
+                random_crop=False,  # 禁用随机裁剪（避免意外裁剪关键解剖结构）
 
+                # 弹性形变配置（医学图像建议关闭）
+                p_elastic_deform=0,  # 设置为0完全禁用，因为弹性形变可能扭曲器官形状
+
+                # 旋转增强配置
+                p_rotation=0.2,  # 20%概率应用旋转增强
+                rotation=(
+                    -30. / 360 * 2. * np.pi,  # 最小旋转角度（-30度，转换为弧度）
+                    30. / 360 * 2. * np.pi    # 最大旋转角度（+30度）
+                ),  # 限制旋转范围避免极端角度导致解剖结构不合理
+
+                # 缩放增强配置
+                p_scaling=0.2,  # 20%概率应用缩放
+                scaling=(0.9, 1.1),  # 缩放范围（0.9-1.1倍），轻微缩放保持形状有效性
+                p_synchronize_scaling_across_axes=1,  # 100%概率保持x/y轴同步缩放（避免各向异性形变）
+
+                # 分割标签专用参数
+                bg_style_seg_sampling=False,  # 禁用背景样式采样（保持标签二值性）
+                mode_seg='nearest'  # 分割标签插值方式（必须用最近邻NEAREST避免边缘模糊）
+        ))
+
+        # 强度变换组合（仅应用于图像，不影响分割标签）
+
+        self.iadvanced_transforms.append( 
+            RandomTransform(
+                GaussianNoiseTransform(
+                    noise_variance=(0, 0.05),  # 噪声方差范围（0-0.05，低强度噪声）
+                    p_per_channel=1  # 100%概率对所有通道添加噪声（单通道医学图像仍适用）
+                ),
+                apply_probability=0.1  # 整体10%概率启用该变换
+            )
+        )
+        self.iadvanced_transforms.append( 
+            RandomTransform(
+                GaussianBlurTransform(
+                    blur_sigma=(0.5, 1.0),  # 模糊核sigma范围（轻度模糊）
+                    # 以下参数保持默认（单通道医学图像不受影响）
+                    synchronize_channels=False,
+                    synchronize_axes=False,
+                    p_per_channel=0.5
+                ),
+                apply_probability=0.1  # 10%概率启用
+            )
+        )
+            # 高斯噪声增强
+        self.iadvanced_transforms.append( 
+            RandomTransform(
+                MultiplicativeBrightnessTransform(
+                    multiplier_range=(0.9, 1.1),  # 亮度乘数范围（±10%调整）
+                    synchronize_channels=True,  # 多通道时同步调整（医学图像通常单通道，此参数防御性保留）
+                    p_per_channel=1
+                ),
+                apply_probability=0.1  # 10%概率启用
+            )
+        )
+        self.iadvanced_transforms.append( 
+            RandomTransform(
+                ContrastTransform(
+                    contrast_range=(0.9, 1.1),  # 对比度乘数范围（±10%调整）
+                    preserve_range=True,  # 关键参数！保持CT/MRI原始数值范围（如HU单位）
+                    synchronize_channels=True,  # 多通道同步调整
+                    p_per_channel=1
+                ),
+                apply_probability=0.1  # 10%概率启用
+            )
+        )
+        self.iadvanced_transforms = ComposeTransforms(self.iadvanced_transforms)
         # 定义图像变换
         if self.transform is None:
             if self.mode == "train":
@@ -195,12 +296,12 @@ class MyDataset(Dataset):
                     transforms.RandomRotation(90, interpolation=Image.NEAREST),  # 标签使用最近邻插值
                     transforms.Resize((self.img_size, self.img_size), interpolation=Image.NEAREST),
                 ])
+
             else:
                 self.transform = transforms.Compose([
                     transforms.Resize((self.img_size, self.img_size), interpolation=Image.NEAREST),
                 ])
-
-        # 对图像应用变换
+                
         random.seed(self.seed + idx)
         np.random.seed(self.seed + idx)
         torch.manual_seed(self.seed + idx)
@@ -220,6 +321,14 @@ class MyDataset(Dataset):
         # 映射标签值到连续索引
         y_data = np.vectorize(label_mapping.get)(y_data)
         y_data = torch.from_numpy(y_data).long()  # (H, W)
+        x_data = x_data[0].unsqueeze(0)  # (1, H, W)
+
+        if self.mode == "train": # 这里的增强需要保证 图像和分割都是  (1, H, W)
+            # 应用空间变换
+            y_data = y_data.unsqueeze(0) # (1, H, W)
+            tmp = self.iadvanced_transforms(**{"image": x_data, "segmentation": y_data})
+            x_data, y_data = tmp['image'], tmp['segmentation']
+            y_data = y_data.squeeze(0)  # (H, W)
 
         res = {
             'feature': x_data,
