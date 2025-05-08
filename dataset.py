@@ -259,7 +259,6 @@ class MyDataset(Dataset):
         # 对 x_data 进行数据增强
         # TODO: 这里目前简单实现了一下, 但是我们需要参考: https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py 的 643 ~ 673 行的实现方式
         if self.augment and self.mode == 'train':
-        if self.augment and self.mode == 'train':
             x_data, y_data = self.augment_data(x_data, y_data)
         else:
             x_data = torch.tensor(x_data).float()
