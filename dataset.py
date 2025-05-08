@@ -5,7 +5,17 @@ import nibabel as nib
 import os, pickle, random
 from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
-import torchvision.transforms.functional as F
+from torchvision import transforms
+from PIL import Image
+from tqdm import tqdm
+
+from batchgeneratorsv2.transforms.intensity.brightness import MultiplicativeBrightnessTransform
+from batchgeneratorsv2.transforms.intensity.contrast import ContrastTransform
+from batchgeneratorsv2.transforms.intensity.gaussian_noise import GaussianNoiseTransform
+from batchgeneratorsv2.transforms.noise.gaussian_blur import GaussianBlurTransform
+from batchgeneratorsv2.transforms.spatial.spatial import SpatialTransform
+from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
+from batchgeneratorsv2.transforms.utils.random import RandomTransform
 
 # 读取 NIfTI 文件 (.nii.gz) 使用 SimpleITK
 def read_nifti_with_simpleitk(file_path):
@@ -155,7 +165,7 @@ class MyDataset(Dataset):
             os.makedirs(label_cache_dir, exist_ok=True)
             new_x_list = []
             new_y_list = []
-            for x_meta, y_meta in zip(self.x_list, self.y_list):
+            for x_meta, y_meta in tqdm(zip(self.x_list, self.y_list), total=len(self.x_list), desc='数据预处理进度'):
                 x_path, slice_idx = x_meta.split('@')
                 y_path, _  = y_meta.split('@')
                 si = int(slice_idx)
@@ -248,7 +258,7 @@ class MyDataset(Dataset):
 
         # 对 x_data 进行数据增强
         # TODO: 这里目前简单实现了一下, 但是我们需要参考: https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py 的 643 ~ 673 行的实现方式
-        if self.augment:
+        if self.augment and self.mode == 'train':
             x_data, y_data = self.augment_data(x_data, y_data)
         else:
             x_data = torch.tensor(x_data).float()
@@ -287,14 +297,99 @@ class MyDataset(Dataset):
     
     def augment_data(self, x_data, y_data):
         # x_data, y_data 都是 ndarray, x_data 在 [-1, 1] 之间, y_data 是 0/1, shape 都是 [H W]
+        transform = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomRotation(90, interpolation=Image.NEAREST),  # 标签使用最近邻插值
+        ])
+
+        advanced_transforms =[]
+        # 更可控的空间变换配置（同时作用于图像和分割标签，需保持几何一致性）
+        advanced_transforms.append(
+            SpatialTransform(
+                # 基础参数
+                (512, 512),  # 输出图像尺寸（高度，宽度）
+                patch_center_dist_from_border=0,  # 采样中心点距离边缘的偏移（0表示从图像中心采样）
+                random_crop=False,  # 禁用随机裁剪（避免意外裁剪关键解剖结构）
+
+                # 弹性形变配置（医学图像建议关闭）
+                p_elastic_deform=0,  # 设置为0完全禁用，因为弹性形变可能扭曲器官形状
+
+                # 旋转增强配置
+                p_rotation=0.2,  # 20%概率应用旋转增强
+                rotation=(
+                    -30. / 360 * 2. * np.pi,  # 最小旋转角度（-30度，转换为弧度）
+                    30. / 360 * 2. * np.pi    # 最大旋转角度（+30度）
+                ),  # 限制旋转范围避免极端角度导致解剖结构不合理
+
+                # 缩放增强配置
+                p_scaling=0.2,  # 20%概率应用缩放
+                scaling=(0.9, 1.1),  # 缩放范围（0.9-1.1倍），轻微缩放保持形状有效性
+                p_synchronize_scaling_across_axes=1,  # 100%概率保持x/y轴同步缩放（避免各向异性形变）
+
+                # 分割标签专用参数
+                bg_style_seg_sampling=False,  # 禁用背景样式采样（保持标签二值性）
+                mode_seg='nearest'  # 分割标签插值方式（必须用最近邻NEAREST避免边缘模糊）
+        ))
+
+        # 强度变换组合（仅应用于图像，不影响分割标签）
+
+        advanced_transforms.append( 
+            RandomTransform(
+                GaussianNoiseTransform(
+                    noise_variance=(0, 0.05),  # 噪声方差范围（0-0.05，低强度噪声）
+                    p_per_channel=1  # 100%概率对所有通道添加噪声（单通道医学图像仍适用）
+                ),
+                apply_probability=0.1  # 整体10%概率启用该变换
+            )
+        )
+        advanced_transforms.append( 
+            RandomTransform(
+                GaussianBlurTransform(
+                    blur_sigma=(0.5, 1.0),  # 模糊核sigma范围（轻度模糊）
+                    # 以下参数保持默认（单通道医学图像不受影响）
+                    synchronize_channels=False,
+                    synchronize_axes=False,
+                    p_per_channel=0.5
+                ),
+                apply_probability=0.1  # 10%概率启用
+            )
+        )
+            # 高斯噪声增强
+        advanced_transforms.append( 
+            RandomTransform(
+                MultiplicativeBrightnessTransform(
+                    multiplier_range=(0.9, 1.1),  # 亮度乘数范围（±10%调整）
+                    synchronize_channels=True,  # 多通道时同步调整（医学图像通常单通道，此参数防御性保留）
+                    p_per_channel=1
+                ),
+                apply_probability=0.1  # 10%概率启用
+            )
+        )
+        advanced_transforms.append( 
+            RandomTransform(
+                ContrastTransform(
+                    contrast_range=(0.9, 1.1),  # 对比度乘数范围（±10%调整）
+                    preserve_range=True,  # 关键参数！保持CT/MRI原始数值范围（如HU单位）
+                    synchronize_channels=True,  # 多通道同步调整
+                    p_per_channel=1
+                ),
+                apply_probability=0.1  # 10%概率启用
+            )
+        )
+        advanced_transforms = ComposeTransforms(advanced_transforms)
+
+        # x_data, y_data 都是 ndarray, x_data 在 [-1, 1] 之间, y_data 是 0/1, shape 都是 [H W]
         x = torch.tensor(x_data).float()
         y = torch.tensor(y_data).float()
-        if random.random() < 0.5:
-            x = F.hflip(x)
-            y = F.hflip(y)
-        if random.random() < 0.5:
-            x = F.vflip(x)
-            y = F.vflip(y)
+
+        # 应用空间变换
+        x = x.unsqueeze(0) # (1, H, W)
+        y = y.unsqueeze(0) # (1, H, W)
+        tmp = advanced_transforms(**{"image": x, "segmentation": y})
+        x, y = tmp['image'], tmp['segmentation']
+        x = x.squeeze(0) # (H, W)
+        y = y.squeeze(0) # (H, W)
         return x, y
 
 if __name__ == '__main__':

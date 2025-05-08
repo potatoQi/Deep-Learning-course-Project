@@ -169,7 +169,7 @@ class CustomMetricCallback(Callback):
     @torch.no_grad()
     def on_test_epoch_end(self, trainer, pl_module):
         mean_dice = sum(self.dice_list) / len(self.dice_list)
-        self.log('val_dice', mean_dice, prog_bar=True, on_step=False, on_epoch=True)
+        self.log('test_dice', mean_dice, prog_bar=True, on_step=False, on_epoch=True)
 
         fake_np = np.stack(self.fake_label_list, axis=0)  # [N, C, H, W]
         real_np = np.stack(self.real_label_list, axis=0)

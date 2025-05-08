@@ -23,6 +23,9 @@
 6. 🔄 **断点续训**
 
    * 自动比较配置，加载最新 checkpoint 或指定 checkpoint 或清空重训
+7. 🖼️ 数据增强
+
+   * 本项目在 DataModule 中集成了可控的数据增强策略，包含基础翻转、旋转和高级强度及空间变换
 
 ## 📦 安装与依赖
 
@@ -63,7 +66,7 @@ Dataset:
     data_dir: 'D:\Downloads\medical'
     mode: train
     length: 1             # 2D 卷积就把这里设为 1 (目前 3D 卷积还在 dev 阶段)
-    augment: false
+    augment: false         # 是否开启数据增强
     size: [32, 32]        # 这个参数只支持 3D 卷积, 2D 卷积会无视这个参数
     use_metadata: false    # 是否将数据集路径缓存到本地加速读取
     accelerate: true     # 是否将数据集转换为 npy 到本地加速读取
